@@ -1,6 +1,19 @@
 # Redis for the CTF platform: scoreboard cache, pub/sub for live updates, and
-# rate limiting. Ephemeral (emptyDir) — Postgres is the source of truth, so a
-# restart just rebuilds the cache. Password from ESO-synced `ctf-secrets`.
+# rate limiting. Postgres remains the source of truth, but the rate limiter fails
+# CLOSED, so a Redis restart takes flag submission offline until it returns. To
+# shrink that window on this single node, Redis is persistent (AOF on a PVC) so it
+# recovers its state on restart instead of coming back empty.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: ctf
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -20,6 +33,8 @@ metadata:
   namespace: ctf
 spec:
   replicas: 1
+  strategy:
+    type: Recreate          # RWO PVC — never two pods attached at once
   selector:
     matchLabels:
       app: redis
@@ -31,7 +46,7 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          command: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\""]
+          command: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\" --appendonly yes"]
           env:
             - name: REDIS_PASSWORD
               valueFrom:
@@ -52,4 +67,5 @@ spec:
               mountPath: /data
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: redis-data
