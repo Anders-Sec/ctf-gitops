@@ -1,0 +1,26 @@
+# ArgoCD Application for the CTF infra foundation: namespace + ESO plumbing +
+# Postgres + Redis + cert. Apply once into the existing ArgoCD AFTER Vault is
+# populated (see README) so the ESO-synced ctf-secrets exists before the
+# datastores start.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ctf-infra
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Anders-Sec/ctf-gitops.git
+    targetRevision: main
+    path: infra
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ctf
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

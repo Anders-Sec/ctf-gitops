@@ -1,0 +1,12 @@
+# The CTF platform namespace + the ServiceAccount that External Secrets uses to
+# authenticate to Vault (the Vault k8s auth role "ctf" is bound to this SA).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctf
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets-sa
+  namespace: ctf
