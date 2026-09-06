@@ -1,6 +1,8 @@
-# TLS for the CTF platform via cert-manager DNS-01 (existing letsencrypt-prod
-# ClusterIssuer + Cloudflare token, which already covers the itpluto.dev zone).
-# Issues regardless of whether the A/CNAME record exists yet.
+# TLS for the CTF platform (ctf-nm.org) via cert-manager DNS-01 using the
+# existing letsencrypt-prod ClusterIssuer + Cloudflare token. The Cloudflare
+# token (secret cloudflare-api-token in cert-manager ns) must have Zone:DNS:Edit
+# on the ctf-nm.org zone. Apex + wildcard so subdomains are covered too.
+# The app's Ingress references secretName: ctf-tls.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -12,4 +14,5 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - "ctf.itpluto.dev"
+    - "ctf-nm.org"
+    - "*.ctf-nm.org"

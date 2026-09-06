@@ -1,6 +1,9 @@
 # ctf-gitops
 
-GitOps for the self-hosted, D&D-themed **Capture The Flag** platform on `ctf.itpluto.dev`.
+GitOps for the self-hosted, D&D-themed **Capture The Flag** platform on `ctf-nm.org`.
+
+> **Deploying the app?** See [DEPLOYMENT.md](DEPLOYMENT.md) — the contract for the
+> app team (datastores, secrets, images, ingress, conventions).
 
 Stack: React/Vite (frontend) · FastAPI (backend) · PostgreSQL (source of truth) ·
 Redis (scoreboard cache / pub-sub / rate limiting) · Entra ID + passwordless
@@ -38,7 +41,7 @@ The Secret is untracked by ArgoCD (not in the repo), so sync/prune leaves it alo
 - `infra/namespace.yaml` — `ctf` namespace.
 - `infra/postgres.yaml` — dedicated Postgres 16 (password from `ctf-secrets`), 8Gi PVC.
 - `infra/redis.yaml` — Redis 7 (password from `ctf-secrets`), ephemeral.
-- `infra/cert.yaml` — `ctf.itpluto.dev` cert via `letsencrypt-prod`.
+- `infra/cert.yaml` — `ctf-nm.org` (+ wildcard) cert via `letsencrypt-prod`.
 - `infra-app.yaml` — ArgoCD Application syncing `infra/`.
 
 ## Bootstrap (once)
