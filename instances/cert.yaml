@@ -1,0 +1,16 @@
+# Wildcard TLS for per-instance subdomains, terminated by the instance Ingress.
+# A Certificate (not a copied secret) so cert-manager renews it in-place here —
+# a manual copy of ctf-tls would silently expire in ~60 days. Secret name is
+# `ctf-tls`, matching the app's default assumption.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ctf-instances-tls
+  namespace: ctf-instances
+spec:
+  secretName: ctf-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.ctf-nm.org"

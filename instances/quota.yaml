@@ -1,0 +1,30 @@
+# Caps the blast radius of live instances on the shared node (16 core / ~31Gi).
+# With platform+app at ~5% CPU / 4% mem, 8 CPU / 20Gi of requests is comfortable.
+# The app also caps 2 concurrent instances per player/party and degrades to
+# "no capacity" when the quota is hit.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ctf-instances-quota
+  namespace: ctf-instances
+spec:
+  hard:
+    pods: "80"
+    requests.cpu: "8"
+    requests.memory: 20Gi
+    limits.cpu: "16"
+    limits.memory: 24Gi
+---
+# Defaults + ceiling for any container that doesn't set its own (the app does set
+# 100m/128Mi req, 250m/256Mi lim). max keeps a single instance from hogging the node.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ctf-instances-limits
+  namespace: ctf-instances
+spec:
+  limits:
+    - type: Container
+      default: { cpu: 250m, memory: 256Mi }
+      defaultRequest: { cpu: 100m, memory: 128Mi }
+      max: { cpu: "1", memory: 1Gi }

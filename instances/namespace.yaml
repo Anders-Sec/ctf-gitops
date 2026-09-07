@@ -1,0 +1,15 @@
+# Namespace for live challenge instances. The backend (SA ctf/ctf-backend) creates
+# Pods/Services/NetworkPolicies/Ingresses here at runtime; everything is namespaced.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctf-instances
+---
+# Harden the default SA: no auto-mounted token. The app already sets this per-pod,
+# but defaulting it off means a pod that forgets can't accidentally get a token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ctf-instances
+automountServiceAccountToken: false
