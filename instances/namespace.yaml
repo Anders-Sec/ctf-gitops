@@ -5,11 +5,16 @@ kind: Namespace
 metadata:
   name: ctf-instances
 ---
-# Harden the default SA: no auto-mounted token. The app already sets this per-pod,
-# but defaulting it off means a pod that forgets can't accidentally get a token.
+# Harden the default SA: no auto-mounted token (the app also sets this per-pod, but
+# defaulting it off means a pod that forgets can't accidentally get a token). Also
+# attach ghcr-pull so instance pods pull private challenge images with no per-pod
+# imagePullSecrets plumbing. Token automount and imagePullSecrets are independent,
+# so this stays token-less.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: default
   namespace: ctf-instances
 automountServiceAccountToken: false
+imagePullSecrets:
+  - name: ghcr-pull
