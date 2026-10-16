@@ -40,8 +40,15 @@ spec:
     pods: "20"
     requests.cpu: "2"        # actual need ~625m
     requests.memory: 4Gi     # actual need ~1.3Gi
-    limits.cpu: "8"          # actual need ~5.75 (backend alone is 2 x 2)
-    limits.memory: 8Gi       # actual need ~3.5Gi
+    # Headroom for ROLLING UPDATES, not just steady state: during a roll the
+    # outgoing and incoming pods coexist, so peak limits exceed the settled
+    # figure. At 8 the second backend replica was refused with "exceeded quota
+    # ... used: limits.cpu=7750m, limited: limits.cpu=8" while an old replica
+    # set was still terminating. Steady state is ~5.75; a surge reaches ~7.75.
+    # limits are ceilings rather than reservations, so this does not reserve
+    # anything on the 16-core node -- requests.cpu above is the real claim.
+    limits.cpu: "12"
+    limits.memory: 12Gi
 ---
 # Defaults for any container that does not set its own, plus a per-container
 # ceiling so one bld pod cannot crowd prod off the node.
