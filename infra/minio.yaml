@@ -1,8 +1,19 @@
-# S3-compatible object storage for challenge artifacts (handout files). Chosen
-# over an RWO PVC on the backend so uploads are visible to every backend replica.
-# Root creds come from ctf-secrets (minio-access-key / minio-secret-key); the app
-# uses the same as S3_ACCESS_KEY / S3_SECRET_KEY. Bucket `ctf-artifacts` is created
-# by the PostSync hook below.
+# S3-compatible object storage for challenge artifacts (handout files, avatars).
+# Chosen over an RWO PVC on the backend so uploads are visible to every backend
+# replica.
+#
+# Backed by SeaweedFS, not MinIO: MinIO's public images were withdrawn from
+# Docker Hub (docker.io/minio/minio and minio/mc both 404 as of 2026-10-16), which
+# is what left this Deployment in ImagePullBackOff. quay.io/minio/minio refuses
+# anonymous pulls, so a pull credential would not have fixed it. SeaweedFS is
+# freely pullable and actively maintained.
+#
+# Deliberately unchanged so nothing app-side moves: the Service is still named
+# `minio` on port 9000, so the backend's
+# S3_ENDPOINT_URL=http://minio.ctf.svc.cluster.local:9000 still resolves, and
+# credentials still come from ctf-secrets (minio-access-key / minio-secret-key),
+# which the app consumes as S3_ACCESS_KEY / S3_SECRET_KEY. Bucket is still
+# `ctf-artifacts`, created by the PostSync hook below. The PVC is reused as-is.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -31,34 +42,78 @@ spec:
       labels:
         app: minio
     spec:
+      # SeaweedFS takes its S3 credentials from a config file rather than env
+      # vars, so render it from ctf-secrets at start-up. This keeps the Secret
+      # unchanged (same two keys) — no out-of-band secret edit needed.
+      initContainers:
+        - name: render-s3-config
+          image: chrislusf/seaweedfs:4.48
+          env:
+            - name: AK
+              valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-access-key } }
+            - name: SK
+              valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-secret-key } }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              cat > /etc/seaweedfs/s3.json <<EOF
+              {
+                "identities": [
+                  {
+                    "name": "ctf",
+                    "credentials": [
+                      { "accessKey": "${AK}", "secretKey": "${SK}" }
+                    ],
+                    "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+                  }
+                ]
+              }
+              EOF
+              chmod 0400 /etc/seaweedfs/s3.json
+          volumeMounts:
+            - name: s3-config
+              mountPath: /etc/seaweedfs
       containers:
         - name: minio
-          image: minio/minio:latest   # TODO: pin a RELEASE.* tag before the event
-          args: ["server", "/data", "--console-address", ":9001"]
-          env:
-            - name: MINIO_ROOT_USER
-              valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-access-key } }
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-secret-key } }
+          image: chrislusf/seaweedfs:4.48
+          # `server` runs master+volume+filer+s3 in one process — the single-node
+          # form. -s3.port=9000 keeps the port the app already points at.
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.port=9000
+            - -s3.config=/etc/seaweedfs/s3.json
           ports:
             - { name: api, containerPort: 9000 }
-            - { name: console, containerPort: 9001 }
+          # TCP probes rather than an HTTP path: the S3 gateway has no documented
+          # health endpoint equivalent to MinIO's /minio/health/*, and a TCP
+          # check is the honest test of "is the S3 port serving".
           readinessProbe:
-            httpGet: { path: /minio/health/ready, port: 9000 }
+            tcpSocket: { port: 9000 }
+            initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /minio/health/live, port: 9000 }
+            tcpSocket: { port: 9000 }
+            initialDelaySeconds: 20
             periodSeconds: 20
           resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: "1", memory: 512Mi }
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: minio-data
+        - name: s3-config
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -70,10 +125,11 @@ spec:
     app: minio
   ports:
     - { name: api, port: 9000, targetPort: 9000 }
-    - { name: console, port: 9001, targetPort: 9001 }
 ---
-# Idempotently create the ctf-artifacts bucket after each sync (mc mb is a no-op
-# if it already exists). Runs as an ArgoCD PostSync hook.
+# Idempotently create the ctf-artifacts bucket after each sync. Uses the AWS CLI
+# against the S3 endpoint instead of `mc` — minio/mc:latest is also gone from
+# Docker Hub, so the old hook could no longer run either. `s3 mb` on an existing
+# bucket is treated as success below.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -89,21 +145,29 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-        - name: mc
-          image: minio/mc:latest
+        - name: awscli
+          image: amazon/aws-cli:2.38.1
           env:
-            - name: AK
+            - name: AWS_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-access-key } }
-            - name: SK
+            - name: AWS_SECRET_ACCESS_KEY
               valueFrom: { secretKeyRef: { name: ctf-secrets, key: minio-secret-key } }
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: EP
+              value: http://minio.ctf.svc.cluster.local:9000
           command:
             - /bin/sh
             - -c
             - |
-              set -e
+              set -eu
               for i in $(seq 1 30); do
-                if mc alias set local http://minio.ctf.svc.cluster.local:9000 "$AK" "$SK" 2>/dev/null; then break; fi
-                echo "waiting for minio..."; sleep 3
+                if aws --endpoint-url "$EP" s3 ls >/dev/null 2>&1; then break; fi
+                echo "waiting for s3 endpoint..."; sleep 3
               done
-              mc mb --ignore-existing local/ctf-artifacts
-              echo "bucket ctf-artifacts ready"
+              if aws --endpoint-url "$EP" s3api head-bucket --bucket ctf-artifacts 2>/dev/null; then
+                echo "bucket ctf-artifacts already present"
+              else
+                aws --endpoint-url "$EP" s3 mb s3://ctf-artifacts
+                echo "bucket ctf-artifacts created"
+              fi
