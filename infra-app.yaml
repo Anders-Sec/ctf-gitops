@@ -1,7 +1,11 @@
-# ArgoCD Application for the CTF infra foundation: namespace + ESO plumbing +
-# Postgres + Redis + cert. Apply once into the existing ArgoCD AFTER Vault is
-# populated (see README) so the ESO-synced ctf-secrets exists before the
-# datastores start.
+# ArgoCD Application for the CTF infra foundation: namespace + Postgres + Redis +
+# artifact store + cert. Apply once into the existing ArgoCD AFTER `ctf-secrets`
+# exists, so the datastores find their credentials on first sync.
+#
+# No ESO or Vault involved: the cluster's Vault runs in dev mode (in-memory) and
+# is not a durable secret store, so ctf-secrets is a plain out-of-band Secret
+# created by hand and deliberately untracked here, which is why sync/prune leaves
+# it alone. See the README.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

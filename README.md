@@ -2,8 +2,10 @@
 
 GitOps for the self-hosted, D&D-themed **Capture The Flag** platform on `ctf-nm.org`.
 
-> **Deploying the app?** See [DEPLOYMENT.md](DEPLOYMENT.md) — the contract for the
-> app team (datastores, secrets, images, ingress, conventions).
+> **Deploying the app?** The contract for the app team (datastores, secrets,
+> images, ingress, conventions) is agreed with the app side as
+> `BuildEnvRequest.md` in the cross-session share; the last reply recorded in
+> this repo is [DEPLOYMENT-REPLY-4.md](DEPLOYMENT-REPLY-4.md).
 
 Stack: React/Vite (frontend) · FastAPI (backend) · PostgreSQL (source of truth) ·
 Redis (scoreboard cache / pub-sub / rate limiting) · Entra ID + passwordless
@@ -40,8 +42,24 @@ The Secret is untracked by ArgoCD (not in the repo), so sync/prune leaves it alo
 ## Layout
 - `infra/namespace.yaml` — `ctf` namespace.
 - `infra/postgres.yaml` — dedicated Postgres 16 (password from `ctf-secrets`), 8Gi PVC.
-- `infra/redis.yaml` — Redis 7 (password from `ctf-secrets`), ephemeral.
+- `infra/redis.yaml` — Redis 7 (password from `ctf-secrets`), **persistent**
+  (AOF on a 2Gi PVC). Not ephemeral: the app's rate limiter fails CLOSED, so a
+  Redis restart takes flag submission offline until it returns, and persistence
+  shrinks that window on this single node.
 - `infra/cert.yaml` — `ctf-nm.org` (+ wildcard) cert via `letsencrypt-prod`.
+- `infra/minio.yaml` — S3-compatible artifact store. Runs **SeaweedFS** behind a
+  Service still named `minio` on :9000, so the app's `S3_ENDPOINT_URL` is
+  unchanged. MinIO's own images were withdrawn from Docker Hub (both
+  `minio/minio` and `minio/mc` 404), so a pull credential would not fix it.
+- `instances/` — one-time `ctf-instances` setup: namespace, quota/limits, RBAC,
+  standing default-deny, wildcard cert. Instance objects themselves are created
+  by the app at runtime.
+- `bld/` — the **bld** rehearsal environment in namespace `ctf-bld`: namespace,
+  quota/limits, its own Postgres + Redis, wildcard-only cert, NetworkPolicies.
+  Reached only via a local hosts-file entry for `bld.ctf-nm.org` → `10.0.0.234`;
+  no public DNS record. No artifact store and instances are off by choice.
+- `app.yaml` / `infra-app.yaml` / `instances-app.yaml` / `bld-infra-app.yaml` /
+  `bld-app.yaml` — the ArgoCD Applications.
 - `infra-app.yaml` — ArgoCD Application syncing `infra/`.
 
 ## Bootstrap (once)
@@ -50,12 +68,12 @@ The Secret is untracked by ArgoCD (not in the repo), so sync/prune leaves it alo
 # 2. deploy the infra
 kubectl apply -f infra-app.yaml   # into the existing ArgoCD
 ```
-ArgoCD brings up Postgres + Redis and issues the cert. `ctf.itpluto.dev` resolves
-via the existing `*.itpluto.dev` record (confirm once the app's ingress exists).
+ArgoCD brings up Postgres + Redis and issues the cert for `ctf-nm.org` (apex +
+wildcard), so subdomains are covered without a per-host certificate.
 
 ## Add the app (later)
 Build + push the frontend/backend images, add the app chart + ingress
-(`ctf.itpluto.dev`, same-origin `/api`, websocket-friendly for the live scoreboard),
+(`ctf-nm.org`, same-origin `/api`, websocket-friendly for the live scoreboard),
 consuming `ctf-secrets` (`DATABASE_URL`/`REDIS_URL`/auth) via `envFrom`.
 
 ## Notes
