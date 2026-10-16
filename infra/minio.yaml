@@ -71,7 +71,12 @@ spec:
                 ]
               }
               EOF
-              chmod 0400 /etc/seaweedfs/s3.json
+              # 0444, not 0400: the main container runs as a different user
+              # than this initContainer (the image sets its own UID and we set
+              # no securityContext), so an owner-only file is unreadable by
+              # `weed` and it exits. The file sits in a pod-scoped emptyDir,
+              # so this is the same trust boundary as the env vars above.
+              chmod 0444 /etc/seaweedfs/s3.json
           volumeMounts:
             - name: s3-config
               mountPath: /etc/seaweedfs
