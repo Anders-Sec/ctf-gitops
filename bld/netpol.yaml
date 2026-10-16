@@ -128,15 +128,20 @@ spec:
     # manually-managed Endpoints pointing at 10.0.0.151, an off-cluster host on
     # the LAN. No podSelector or namespaceSelector can ever match it, and traffic
     # to the Service ClusterIP is DNAT'd to this address before egress is
-    # evaluated. bld deliberately shares prod's single on-LAN model host, which
+    # evaluated.
+    #
+    # Port 8000, not 1235: the model provider was changed from LM Studio to vLLM
+    # on the same host. The Service port stays 1235 so the app's AI_BASE_URL is
+    # unchanged -- the move is absorbed in the Endpoints object, which is the
+    # whole point of putting an off-cluster host behind a Service. bld deliberately shares prod's single on-LAN model host, which
     # is why AI_BASE_URL in deploy/bld points at ai.ctf.svc — the Service object
     # is only a DNS/DNAT indirection, so allowing the endpoint address covers it
     # regardless of which namespace's Service is used to reach it.
     - to:
         - ipBlock: { cidr: 10.0.0.151/32 }
       ports:
-        - { protocol: TCP, port: 1235 }   # model API
-        - { protocol: TCP, port: 8188 }   # image generation
+        - { protocol: TCP, port: 8000 }   # model API (vLLM; was LM Studio on 1235)
+        - { protocol: TCP, port: 8188 }   # image generation (ComfyUI)
     # SMTP (mail relay for passwordless magic-link login).
     #
     # Port-scoped rather than address-scoped on purpose: the relay
