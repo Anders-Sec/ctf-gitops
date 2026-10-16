@@ -70,11 +70,13 @@ spec:
 # Backend egress. Deliberately narrower than prod's will be:
 #   - no ctf-instances egress — instances are OFF for bld, so there is nothing
 #     there to manage and no namespace to reach.
-#   - no AI (10.0.0.151) and no SMTP — those are optional features and bld starts
-#     without them configured. If either is enabled in bld later, this policy must
-#     be extended or the calls will fail CLOSED. The AI endpoint in particular is
-#     an off-cluster LAN host behind a selectorless Service, so it needs an
-#     explicit ipBlock and will not match any pod selector.
+#   - no AI (10.0.0.151) — still optional and unconfigured in bld. If it is
+#     enabled later this policy must be extended or the calls fail CLOSED. That
+#     endpoint is an off-cluster LAN host behind a selectorless Service, so it
+#     needs an explicit ipBlock and will not match any pod selector.
+#   - SMTP *is* allowed, see below. It was omitted originally because bld started
+#     with mail unconfigured; once SMTP credentials were added to ctf-bld-secrets
+#     the sends failed CLOSED with SMTPConnectError until this rule existed.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -119,6 +121,26 @@ spec:
         - ipBlock: { cidr: 10.0.0.234/32 }
       ports:
         - { protocol: TCP, port: 6443 }
+    # SMTP (mail relay for passwordless magic-link login).
+    #
+    # Port-scoped rather than address-scoped on purpose: the relay
+    # (smtp.protonmail.ch) resolved to three different addresses when this was
+    # written and providers rotate them, so pinning ipBlocks would break mail
+    # silently the next time they change. Allowing one TCP port outbound is the
+    # stable form, and still far tighter than prod, whose namespace has no
+    # NetworkPolicy at all.
+    #
+    # 10.0.0.0/8 is excluded so this cannot become a general route into the pod
+    # CIDR (10.42/16), the service CIDR (10.43/16) or the LAN (10.0.0.0/24) on
+    # this port. If an internal relay is ever used instead, that exclusion is
+    # what will need revisiting.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+      ports:
+        - { protocol: TCP, port: 587 }
 ---
 # Frontend serves static assets and needs nothing but name resolution. It does not
 # talk to the backend: the ingress routes /api straight to ctf-backend rather than
