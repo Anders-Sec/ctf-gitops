@@ -93,6 +93,28 @@ clear event-end by at least 30 days, so **the event must end on or before 2026-1
 for these to hold. If it runs later, reissue both with a longer lifetime before
 the event rather than during it.
 
+### `canary-secret` — set once, NEVER rotate during an event
+
+`canary-secret` is the HMAC key behind every canary token (spec 075). Set
+2026-10-16 in `ctf-secrets` and `ctf-bld-secrets`, independently generated per
+environment (64 bytes each, `openssl rand -base64 48`) so a bld-issued token
+cannot resolve against prod or vice versa.
+
+**Do not rotate it while an event is running, and do not rotate it while any
+issued sample is still outstanding.** Every already-downloaded malware sample
+carries a token HMAC'd with this key. Rotating makes all outstanding tokens
+unresolvable, so a callback can no longer be attributed to the player it came
+from — which is the entire point of the feature. There is no migration path:
+the old tokens simply stop verifying.
+
+Consequences for routine work:
+- Never include it in a "rotate all secrets" sweep.
+- `kubectl patch` on these Secrets must not blind-overwrite this key; check it is
+  absent before setting it (it was absent when first set, so nothing was lost).
+- The backend reads it via `secretKeyRef` at pod start, so a change only takes
+  effect on a pod roll — which means a mistaken rotation can sit unnoticed until
+  the next restart, then break attribution for every sample issued before it.
+
 **Rotating `ghcr-pull`: all THREE namespaces must be updated together** — `ctf`,
 `ctf-bld` and `ctf-instances`. A stale copy in any one of them is invisible while
 the GHCR packages are public, because anonymous pulls succeed and mask it. It only
