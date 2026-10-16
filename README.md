@@ -76,6 +76,28 @@ Build + push the frontend/backend images, add the app chart + ingress
 (`ctf-nm.org`, same-origin `/api`, websocket-friendly for the live scoreboard),
 consuming `ctf-secrets` (`DATABASE_URL`/`REDIS_URL`/auth) via `envFrom`.
 
+## Credential runbook
+
+Both credentials are plain out-of-band Secrets, created by hand and deliberately
+untracked here (same model as `ctf-secrets`), so ArgoCD sync/prune leaves them
+alone. Values live only in the cluster; record your own copies somewhere you
+control.
+
+| Credential | Where | Type / scope | Created | Expires |
+|---|---|---|---|---|
+| `ghcr-pull` | Secrets in ns `ctf`, `ctf-bld`, `ctf-instances` | GitHub **classic** PAT, `read:packages` only | 2026-10-16 | **2027-01-14** |
+| `repo-anders-sec-ctf` | Secret in ns `argocd`, label `argocd.argoproj.io/secret-type: repository` | GitHub **fine-grained** PAT, `Contents: Read-only`, `Anders-Sec/ctf` only | 2026-10-16 | **2027-01-14** |
+
+Both were issued with a 90-day lifetime. The build request requires expiry to
+clear event-end by at least 30 days, so **the event must end on or before 2026-12-15**
+for these to hold. If it runs later, reissue both with a longer lifetime before
+the event rather than during it.
+
+Verified at creation: the `read:packages` token authenticates to GHCR and pulls
+`ctf-backend` and `ctf-frontend` in both `ctf` and `ctf-bld`; the fine-grained
+PAT clones `Anders-Sec/ctf` over HTTPS and is confirmed **read-only** — a
+dry-run push is rejected with `403 Permission to Anders-Sec/ctf.git denied`.
+
 ## Notes
 - **On-prem/hybrid:** on-prem services and the AI assistant are reached by direct
   cluster networking (in-cluster Service DNS or a plain egress route) — no VPN/
