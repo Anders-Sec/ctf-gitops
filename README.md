@@ -93,6 +93,25 @@ clear event-end by at least 30 days, so **the event must end on or before 2026-1
 for these to hold. If it runs later, reissue both with a longer lifetime before
 the event rather than during it.
 
+**Rotating `ghcr-pull`: all THREE namespaces must be updated together** — `ctf`,
+`ctf-bld` and `ctf-instances`. A stale copy in any one of them is invisible while
+the GHCR packages are public, because anonymous pulls succeed and mask it. It only
+surfaces the moment the packages go private, as:
+
+```
+failed to authorize: failed to fetch oauth token: 403 Forbidden
+```
+
+This happened on 2026-10-16: `ctf-instances` still held a credential from
+2026-09-07 while `ctf` and `ctf-bld` had the new token, so the instant the packages
+went private, challenge images stopped pulling in `ctf-instances` — meaning
+challenge instances could not launch at all, while the app itself looked perfectly
+healthy. Fixed by copying the working Secret across. After any rotation, verify a
+real pull in **each** namespace rather than assuming.
+
+Note the challenge images are tagged `sha-<gitsha>`; there is no `v1` tag despite
+what older reply documents in this repo suggest.
+
 Verified at creation: the `read:packages` token authenticates to GHCR and pulls
 `ctf-backend` and `ctf-frontend` in both `ctf` and `ctf-bld`; the fine-grained
 PAT clones `Anders-Sec/ctf` over HTTPS and is confirmed **read-only** — a
