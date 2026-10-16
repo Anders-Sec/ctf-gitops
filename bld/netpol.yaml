@@ -70,10 +70,11 @@ spec:
 # Backend egress. Deliberately narrower than prod's will be:
 #   - no ctf-instances egress — instances are OFF for bld, so there is nothing
 #     there to manage and no namespace to reach.
-#   - no AI (10.0.0.151) — still optional and unconfigured in bld. If it is
-#     enabled later this policy must be extended or the calls fail CLOSED. That
-#     endpoint is an off-cluster LAN host behind a selectorless Service, so it
-#     needs an explicit ipBlock and will not match any pod selector.
+#   - AI/image generation *is* allowed, see below. Omitted originally on the
+#     assumption bld would start with it unconfigured — but ai_configured only
+#     requires ai_enabled + ai_base_url + ai_model (not an API key), and
+#     deploy/bld sets all three, so bld considered AI live from day one and the
+#     calls failed CLOSED against this policy.
 #   - SMTP *is* allowed, see below. It was omitted originally because bld started
 #     with mail unconfigured; once SMTP credentials were added to ctf-bld-secrets
 #     the sends failed CLOSED with SMTPConnectError until this rule existed.
@@ -121,6 +122,21 @@ spec:
         - ipBlock: { cidr: 10.0.0.234/32 }
       ports:
         - { protocol: TCP, port: 6443 }
+    # AI model + image generation.
+    #
+    # An explicit ipBlock, not a selector: the `ai` Service is SELECTORLESS with
+    # manually-managed Endpoints pointing at 10.0.0.151, an off-cluster host on
+    # the LAN. No podSelector or namespaceSelector can ever match it, and traffic
+    # to the Service ClusterIP is DNAT'd to this address before egress is
+    # evaluated. bld deliberately shares prod's single on-LAN model host, which
+    # is why AI_BASE_URL in deploy/bld points at ai.ctf.svc — the Service object
+    # is only a DNS/DNAT indirection, so allowing the endpoint address covers it
+    # regardless of which namespace's Service is used to reach it.
+    - to:
+        - ipBlock: { cidr: 10.0.0.151/32 }
+      ports:
+        - { protocol: TCP, port: 1235 }   # model API
+        - { protocol: TCP, port: 8188 }   # image generation
     # SMTP (mail relay for passwordless magic-link login).
     #
     # Port-scoped rather than address-scoped on purpose: the relay
