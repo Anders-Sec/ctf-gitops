@@ -91,6 +91,27 @@ spec:
             - -s3
             - -s3.port=9000
             - -s3.config=/etc/seaweedfs/s3.json
+            # Sizing is constrained by real capacity, not by the PVC's declared
+            # 20Gi: local-path PVCs are plain directories on the node's root
+            # filesystem, which is 28.4G with ~4.1G free. The declared PVCs in
+            # this cluster already total more than the disk holds.
+            #
+            # -volume.max: with the default, every slot was taken by the
+            # ctf-artifacts collection, leaving none for the filer's internal
+            # .system log collection. That collection then failed every write
+            # with "No writable volumes" / "topo failed to pick 1 from 0 node
+            # candidates" even though object uploads worked.
+            #
+            # -master.volumeSizeLimitMB: the 30GB default cannot fit on this
+            # disk at all. 16 x 128MB bounds the store to ~2GB.
+            #
+            # -volume.minFreeSpace: hard stop (volumes go ReadOnly) well before
+            # the root filesystem fills -- that disk is shared with containerd,
+            # k3s and every other local-path PVC, so filling it would take the
+            # whole cluster down, not just this store.
+            - -volume.max=16
+            - -master.volumeSizeLimitMB=128
+            - -volume.minFreeSpace=2GiB
           ports:
             - { name: api, containerPort: 9000 }
           # TCP probes rather than an HTTP path: the S3 gateway has no documented
