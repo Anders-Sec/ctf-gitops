@@ -1,0 +1,29 @@
+# ArgoCD Application for the bld rehearsal environment's platform-owned objects:
+# namespace, hardened default SA, quota/limits, Postgres, Redis, wildcard cert and
+# the NetworkPolicies (item 6a). The bld APP itself (backend/frontend/ingress) is a
+# separate Application tracking the app repo's deploy/bld/ — see bld-app.yaml,
+# which is intentionally not applied until that path exists in the app repo.
+#
+# `ctf-bld-secrets` is deliberately NOT in this repo: like `ctf-secrets` it is a
+# plain out-of-band Secret with fresh, distinct credentials, so sync/prune leaves
+# it alone and prod's datastore passwords are never shared with bld.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ctf-bld-infra
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Anders-Sec/ctf-gitops.git
+    targetRevision: main
+    path: bld
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ctf-bld
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

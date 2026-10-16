@@ -1,0 +1,71 @@
+# Redis for bld. Persistent (AOF on a PVC), matching prod's ACTUAL configuration
+# rather than the "ephemeral" description that appears in the README and in the
+# build request: infra/redis.yaml is persistent on purpose, because the app's rate
+# limiter fails CLOSED, so a Redis restart takes flag submission offline until it
+# returns. bld exists to rehearse prod's behaviour, so it mirrors that choice —
+# an ephemeral bld Redis would behave differently from prod on restart, which is
+# exactly the kind of difference a rehearsal environment should not have.
+#
+# Smaller PVC than prod's 2Gi since bld holds rehearsal data only.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: ctf-bld
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ctf-bld
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ctf-bld
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # RWO PVC — never two pods attached at once
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\" --appendonly yes"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ctf-bld-secrets
+                  key: redis-password
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: redis-data

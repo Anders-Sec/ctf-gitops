@@ -1,0 +1,146 @@
+# Pod-reachability isolation for bld (item 6a). Defence in depth for the POD, and
+# explicitly NOT a client-IP gate: once traffic passes through ingress-nginx, a
+# pod-level ipBlock only ever sees the controller, never the real client. Client
+# restriction is impossible here for that reason — see bld/namespace.yaml.
+#
+# Applied to ctf-bld FIRST, before the equivalent pair for the live `ctf`
+# namespace (6b), so the rule set is proven on an empty namespace where a mistake
+# costs nothing. In prod the same mistake would be re-applied continuously by
+# ArgoCD selfHeal, which turns an outage self-sustaining.
+#
+# NetworkPolicies are additive, so the allow-rules below union on top of the
+# default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-bld-default-deny-all
+  namespace: ctf-bld
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# The ingress controller is the only permitted source of inbound traffic, and only
+# on the app's own ports. Ports are the POD ports: ctf-frontend's Service is :80
+# but its container listens on :8080, and NetworkPolicy matches the pod port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-bld-allow-ingress-from-controller
+  namespace: ctf-bld
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [ctf-backend, ctf-frontend]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: 8000 }   # ctf-backend container port
+        - { protocol: TCP, port: 8080 }   # ctf-frontend container port
+---
+# Datastores accept connections from the backend only. Needed explicitly: the
+# default-deny above isolates Postgres and Redis too, so without this the backend
+# cannot reach them even though both sit in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-bld-allow-datastore-ingress
+  namespace: ctf-bld
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [postgres, redis]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: ctf-backend
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+---
+# Backend egress. Deliberately narrower than prod's will be:
+#   - no ctf-instances egress — instances are OFF for bld, so there is nothing
+#     there to manage and no namespace to reach.
+#   - no AI (10.0.0.151) and no SMTP — those are optional features and bld starts
+#     without them configured. If either is enabled in bld later, this policy must
+#     be extended or the calls will fail CLOSED. The AI endpoint in particular is
+#     an off-cluster LAN host behind a selectorless Service, so it needs an
+#     explicit ipBlock and will not match any pod selector.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-bld-allow-backend-egress
+  namespace: ctf-bld
+spec:
+  podSelector:
+    matchLabels:
+      app: ctf-backend
+  policyTypes: [Egress]
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Own datastores
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [postgres, redis]
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+    # Kubernetes API. Both forms are allowed on purpose: policy enforcement here is
+    # iptables-based and evaluates egress after service DNAT, so the ClusterIP form
+    # alone is not reliably sufficient — 10.43.0.1:443 DNATs to the node's
+    # apiserver on :6443.
+    - to:
+        - ipBlock: { cidr: 10.43.0.1/32 }
+      ports:
+        - { protocol: TCP, port: 443 }
+    - to:
+        - ipBlock: { cidr: 10.0.0.234/32 }
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Frontend serves static assets and needs nothing but name resolution. It does not
+# talk to the backend: the ingress routes /api straight to ctf-backend rather than
+# proxying through the frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-bld-allow-frontend-egress
+  namespace: ctf-bld
+spec:
+  podSelector:
+    matchLabels:
+      app: ctf-frontend
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

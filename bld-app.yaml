@@ -1,0 +1,29 @@
+# ArgoCD Application for the bld APP (backend/frontend/ingress), tracking the app
+# repo's deploy/bld/ with automated sync so a CI sha bump rolls bld hands-off.
+#
+# DO NOT APPLY YET. As of 2026-10-16 the app repo has no deploy/bld/ path (its
+# deploy/ holds backend.yaml, frontend.yaml, ingress.yaml and instances/ only).
+# Applying this before that path exists leaves the Application permanently
+# degraded on a missing path. Apply it once the platform session confirms
+# deploy/bld/ has landed — that is step 1 of the cutover order, and it gates this
+# object alone; every other bld object above is independent of it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ctf-bld
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Anders-Sec/ctf.git
+    targetRevision: main
+    path: deploy/bld
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ctf-bld
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

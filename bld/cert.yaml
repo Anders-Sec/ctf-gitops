@@ -1,0 +1,23 @@
+# TLS for bld. Requests the WILDCARD ONLY — deliberately no bld.ctf-nm.org SAN.
+# A named SAN would be published to Certificate Transparency logs within minutes
+# of issuance, and CT scrapers actively probe newly-seen hostnames, which would
+# defeat the whole "nothing publishes the name" design: bld has no public DNS
+# record, so the hostname itself is the only thing keeping it unfound. The
+# wildcard adds nothing new to CT, since *.ctf-nm.org is already published by the
+# prod and instances certs. Do not add the SAN.
+#
+# A Certificate object rather than a copied Secret, so cert-manager renews it in
+# place here — a manual copy of ctf-tls would silently expire in ~60 days.
+# DNS-01 via the existing letsencrypt-prod ClusterIssuer, so no inbound needed.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ctf-bld-tls
+  namespace: ctf-bld
+spec:
+  secretName: ctf-bld-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.ctf-nm.org"

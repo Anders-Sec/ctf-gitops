@@ -1,0 +1,58 @@
+# Namespace for the `bld` rehearsal environment — a prod-equivalent staging stack
+# used to dress-rehearse promotions before the event. Reached only via a local
+# hosts-file entry for bld.ctf-nm.org; there is deliberately no public DNS record
+# and no ingress source-range allow-list (ingress-nginx runs NodePort with
+# externalTrafficPolicy: Cluster, so it never sees the real client IP — a CIDR
+# allow-list here would either deny everyone or, if widened to the pod CIDR,
+# silently admit the whole internet. Do not add one).
+#
+# Instances are OFF for bld: there is no ctf-bld-instances namespace and the
+# backend runs with INSTANCES_ENABLED=false, so no RBAC or instance tooling here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctf-bld
+---
+# Harden the default SA the same way ctf-instances does: no auto-mounted token, so
+# a pod that forgets to opt out cannot accidentally receive one. ghcr-pull is
+# attached here too — the app's own pod specs also name it, which is harmless
+# belt-and-braces and means a pod that omits it still pulls.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ctf-bld
+automountServiceAccountToken: false
+imagePullSecrets:
+  - name: ghcr-pull
+---
+# bld is a rehearsal stack, not a load target, so it gets a deliberately small
+# slice of the shared node (16 core / ~31Gi). ctf-instances already reserves
+# 8 CPU / 20Gi of requests and prod's app sits at roughly 5% CPU, so 2 CPU / 4Gi
+# of requests leaves prod's headroom untouched.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ctf-bld-quota
+  namespace: ctf-bld
+spec:
+  hard:
+    pods: "20"
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+---
+# Defaults for any container that does not set its own, plus a per-container
+# ceiling so one bld pod cannot crowd prod off the node.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ctf-bld-limits
+  namespace: ctf-bld
+spec:
+  limits:
+    - type: Container
+      default: { cpu: 250m, memory: 256Mi }
+      defaultRequest: { cpu: 50m, memory: 128Mi }
+      max: { cpu: "1", memory: 1Gi }
