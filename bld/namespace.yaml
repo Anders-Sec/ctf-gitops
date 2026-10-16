@@ -38,13 +38,20 @@ metadata:
 spec:
   hard:
     pods: "20"
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.cpu: "4"
-    limits.memory: 8Gi
+    requests.cpu: "2"        # actual need ~625m
+    requests.memory: 4Gi     # actual need ~1.3Gi
+    limits.cpu: "8"          # actual need ~5.75 (backend alone is 2 x 2)
+    limits.memory: 8Gi       # actual need ~3.5Gi
 ---
 # Defaults for any container that does not set its own, plus a per-container
 # ceiling so one bld pod cannot crowd prod off the node.
+#
+# max must accommodate the app's own manifests, which mirror prod exactly:
+# ctf-backend sets limits cpu 2 / memory 1Gi. A 1-CPU ceiling (borrowed from the
+# ctf-instances LimitRange, which exists to cage untrusted challenge containers)
+# rejected the backend outright with "maximum cpu usage per Container is 1, but
+# limit is 2" and no backend pod could be created. Prod's own namespace has no
+# LimitRange at all, so this must not be stricter than what prod runs.
 apiVersion: v1
 kind: LimitRange
 metadata:
@@ -55,4 +62,4 @@ spec:
     - type: Container
       default: { cpu: 250m, memory: 256Mi }
       defaultRequest: { cpu: 50m, memory: 128Mi }
-      max: { cpu: "1", memory: 1Gi }
+      max: { cpu: "2", memory: 2Gi }
