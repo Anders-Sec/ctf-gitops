@@ -93,6 +93,30 @@ clear event-end by at least 30 days, so **the event must end on or before 2026-1
 for these to hold. If it runs later, reissue both with a longer lifetime before
 the event rather than during it.
 
+### `key-exchange-secret` / `key-exchange-key-hex` — set once, NEVER rotate
+
+Set 2026-10-18 in `ctf-secrets` and `ctf-bld-secrets`. Unlike every other
+credential here these are **identical in both environments** on purpose: the
+Lantern stage-3 sample is a single build, so a code computed against it must
+verify in either environment (app spec 079).
+
+Taken byte-exact from the build tree rather than retyped —
+`src/common/buildlib.py` (`FLAG1_VALUE`) and `.work/stage2/stage2.json`
+(`stage3_key_hex`). The secret is a UTF-8 string with **no trailing newline and
+no surrounding quotes** (it is used as an HMAC key) and the key is 64 lowercase
+hex characters verbatim. A stray newline anywhere in the chain breaks every
+player's code silently, so verify the byte length the *pod* sees (31 and 64
+respectively), not just that the variable is non-empty.
+
+**Never rotate these, and the reason is worse than for `canary-secret`.** The key
+is compiled into a shipped sample. Rotating does not merely break attribution —
+it makes Chandelier flags 2 and 3 unreachable for every player, silently, with
+the sample simply doing nothing. Recovery requires rebuilding and redistributing
+the sample, not just resetting a Secret. Exclude from any blanket rotation sweep.
+
+Read only at pod start, so the same delayed-blast-radius property applies: a
+mistaken rotation stays invisible until an unrelated roll.
+
 ### `canary-secret` — set once, NEVER rotate during an event
 
 `canary-secret` is the HMAC key behind every canary token (spec 075). Set
