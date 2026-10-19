@@ -76,6 +76,54 @@ Build + push the frontend/backend images, add the app chart + ingress
 (`ctf-nm.org`, same-origin `/api`, websocket-friendly for the live scoreboard),
 consuming `ctf-secrets` (`DATABASE_URL`/`REDIS_URL`/auth) via `envFrom`.
 
+## Node properties worth knowing before you debug
+
+Two characteristics of `k8s-lab` that have each cost a diagnosis already. Neither is
+visible from inside Kubernetes, and both produce symptoms that point elsewhere.
+
+### The guest CPU has no AVX
+
+As of 2026-10-19 the VM runs Proxmox's default `kvm64` CPU model, reported in the
+guest as *QEMU Virtual CPU version 2.5+*:
+
+```
+present: sse4_2, popcnt, aes
+MISSING: avx, avx2, avx512f, fma, bmi2
+```
+
+So this is not old hardware — SSE4.2 and AES-NI are there — it is the model masking
+the AVX family. Anything requiring AVX2 fails at startup. The Kusto emulator
+(spec 085) does: `libKusto.NativeInfra.so` fails with error `2161770698`
+(`0x80DA00CA`), after which Kusto's **own** `FailSlow` crash handler SIGKILLs the
+process. That surfaces as **exit code 137 and "Killed"**, which reads exactly like
+an OOM kill and is not one — check for a cgroup `OOMKilled` reason and a kernel OOM
+message before believing it. Fix is a CPU type of `host` or `x86-64-v3`, which needs
+a **VM power cycle** (a guest reboot does not change emulated CPU features).
+
+Nothing currently deployed needs AVX2 — Postgres, Redis, SeaweedFS, the app and
+ingress-nginx are all fine on baseline x86-64.
+
+### Guest disk size is not backed space
+
+The disk was thin-provisioned on a pool shared with another VM. On 2026-10-19 an
+image pull of ~1.2GB grew this guest into space promised to that other VM and
+**killed both**. The guest reported ~108GB free throughout; nothing in the cluster
+could see the real pool. The other VM has been removed, so the pool now backs this
+guest, but the property is permanent: `df` inside the guest is an upper bound, not a
+guarantee.
+
+That outage also left a **silently corrupt image**: containerd had written a
+truncated layer, and because layer content is digest-verified only at download time
+and never after extraction, it served a 0-byte `/start-kusto.sh` from a
+"successfully pulled" image indefinitely. A disk-full during a pull can leave an
+image that looks cached and healthy and is not. Clearing it needs the layer removed
+from the content store, not just `crictl rmi`:
+
+```sh
+sudo k3s ctr -n k8s.io content rm <layer-digest>
+sudo k3s crictl rmi <image-ref>
+```
+
 ## Credential runbook
 
 Both credentials are plain out-of-band Secrets, created by hand and deliberately
