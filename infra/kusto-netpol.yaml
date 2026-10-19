@@ -1,0 +1,68 @@
+# Network isolation for the Kusto emulator (app spec 085).
+#
+# The engine has NO authentication and speaks plain HTTP, so this policy is the
+# entire access control — not defence in depth. It is deliberately committed
+# BEFORE deploy/kusto.yaml exists: a NetworkPolicy selecting a pod that is not
+# yet running is inert, so applying it now costs nothing and guarantees there is
+# never a moment where the engine is running without it. The reverse order would
+# leave an unauthenticated engine briefly open to every pod in this namespace.
+#
+# Note `ctf` has no namespace-wide default-deny (build request item 6b was never
+# applied), so these two policies are what isolate this pod specifically. Once a
+# pod is selected by any Ingress policy, all ingress not matched by a rule is
+# denied — which is what makes a single targeted allow sufficient here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-kusto-allow-backend-only
+  namespace: ctf
+spec:
+  podSelector:
+    matchLabels:
+      app: ctf-kusto
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: ctf-backend
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Egress lock, which spec 085 did not ask for and which I consider the more
+# important half.
+#
+# KQL includes operators that make the ENGINE fetch a URI on the caller's behalf
+# (`externaldata`, and the various plugins). Players reach this engine through
+# the backend by design, so anything they can express in KQL runs here. Without
+# an egress restriction that is a server-side request forgery primitive sitting
+# inside the cluster: a crafted query could have the engine reach prod's
+# Postgres, Redis, the artifact store, the Kubernetes API, the LAN model host,
+# or the internet — none of which a player should be able to touch, and all of
+# which are reachable from this namespace because there is no default-deny.
+#
+# DNS only. The engine is stateless and is seeded by the backend pushing to it,
+# so it should need no outbound connections of its own. If seeding turns out to
+# PULL from somewhere, it will fail closed and visibly rather than silently, and
+# this policy gets an explicit allow for that destination.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-kusto-egress-lock
+  namespace: ctf
+spec:
+  podSelector:
+    matchLabels:
+      app: ctf-kusto
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
