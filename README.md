@@ -81,27 +81,28 @@ consuming `ctf-secrets` (`DATABASE_URL`/`REDIS_URL`/auth) via `envFrom`.
 Two characteristics of `k8s-lab` that have each cost a diagnosis already. Neither is
 visible from inside Kubernetes, and both produce symptoms that point elsewhere.
 
-### The guest CPU has no AVX
+### Guest CPU features depend on the Proxmox CPU *type*
 
-As of 2026-10-19 the VM runs Proxmox's default `kvm64` CPU model, reported in the
-guest as *QEMU Virtual CPU version 2.5+*:
+**Current state (fixed 2026-10-19):** the VM passes the host CPU through and reports
+*Intel Xeon E5-2680 v3*, with `avx`, `avx2`, `fma` and `bmi2` present. Note
+`avx512f` is **absent and always will be** on this hardware — the E5-2680 v3 is
+Haswell-era and predates AVX-512. A dependency needing AVX-512 cannot be satisfied
+by changing the Proxmox setting.
 
-```
-present: sse4_2, popcnt, aes
-MISSING: avx, avx2, avx512f, fma, bmi2
-```
+**What it was, and why it matters:** the VM previously ran Proxmox's default `kvm64`
+model, reported as *QEMU Virtual CPU version 2.5+*, which kept `sse4_2`, `popcnt`
+and `aes` but masked the whole AVX family. That is not old hardware, it is the model
+hiding features the physical CPU has.
 
-So this is not old hardware — SSE4.2 and AES-NI are there — it is the model masking
-the AVX family. Anything requiring AVX2 fails at startup. The Kusto emulator
-(spec 085) does: `libKusto.NativeInfra.so` fails with error `2161770698`
-(`0x80DA00CA`), after which Kusto's **own** `FailSlow` crash handler SIGKILLs the
-process. That surfaces as **exit code 137 and "Killed"**, which reads exactly like
-an OOM kill and is not one — check for a cgroup `OOMKilled` reason and a kernel OOM
-message before believing it. Fix is a CPU type of `host` or `x86-64-v3`, which needs
-a **VM power cycle** (a guest reboot does not change emulated CPU features).
+The symptom is worth remembering because it is actively misleading. The Kusto
+emulator (spec 085) failed `libKusto.NativeInfra.so` init with error `2161770698`
+(`0x80DA00CA`), after which Kusto's **own** `FailSlow` crash handler SIGKILLed the
+process — surfacing as **exit code 137 and "Killed"**, which reads exactly like an
+OOM kill. It was not: there was no cgroup `OOMKilled` reason, no kernel OOM message,
+and 87GB free against a 6Gi limit. Check all three before believing exit 137.
 
-Nothing currently deployed needs AVX2 — Postgres, Redis, SeaweedFS, the app and
-ingress-nginx are all fine on baseline x86-64.
+Changing the CPU type needs a **VM power cycle**; a guest reboot cannot alter
+emulated CPU features.
 
 ### Guest disk size is not backed space
 
