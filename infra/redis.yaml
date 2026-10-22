@@ -55,13 +55,19 @@ spec:
                   key: redis-password
           ports:
             - containerPort: 6379
+          # Sized for the event kickoff, not steady state. Redis is
+          # SINGLE-THREADED, so a 250m limit meant it throttled at a quarter of
+          # one core while the node's other 39 sat idle — and the moment that
+          # matters is everyone authenticating, hitting the rate limiter and
+          # loading the scoreboard inside the same minute. Connection count was
+          # never the constraint (maxclients 10000, ~9 in use).
           resources:
             requests:
-              cpu: 25m
-              memory: 64Mi
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: 250m
-              memory: 256Mi
+              cpu: "1"
+              memory: 512Mi
           volumeMounts:
             - name: data
               mountPath: /data
