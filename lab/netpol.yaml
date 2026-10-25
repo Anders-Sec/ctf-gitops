@@ -1,0 +1,22 @@
+# The load-bearing containment object. Selects EVERY pod in ctf-lab and allows
+# nothing in either direction — no egress at all, not even DNS, and no ingress.
+#
+# The player's shell arrives as an API-server `exec` stream brokered by the
+# backend, which is not a pod-network path, so the sandbox needs zero network
+# and gets zero. A player who escalates to root inside gVisor therefore has
+# root over a box with no route anywhere: not the cluster, not prod's
+# datastores, not the LAN model host, not the internet.
+#
+# Known and accepted: NetworkPolicy rules take a few seconds to program after a
+# pod starts, so there is a brief window before this bites. The event owner
+# assessed that as immaterial here (2026-10-25) because the player reaches the
+# box through a web terminal whose boot-and-connect time exceeds the window,
+# and a second or two of egress from a sandbox is not a meaningful exposure.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ctf-lab-deny-all
+  namespace: ctf-lab
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

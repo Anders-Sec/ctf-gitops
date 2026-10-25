@@ -1,0 +1,54 @@
+# Lets the app's backend manage sandbox pods in ctf-lab and open a PTY into
+# them. Mirrors the ctf-instances pattern: a Role scoped to THIS namespace,
+# bound to the ctf-backend ServiceAccount which lives in ns ctf. A
+# RoleBinding's subject may come from any namespace; the Role's verbs apply
+# only within ctf-lab, so this grants nothing outside it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ctf-lab-manager
+  namespace: ctf-lab
+rules:
+  # list/watch included on the event owner's instruction (2026-10-25). The
+  # request originally asked for create/get/delete only, but the lab reuses the
+  # spec 008/009 reconciler and TTL machinery, which enumerates pods to find
+  # expired ones. Without list, reaping would fail silently and pods would
+  # accumulate until the 15-pod quota blocked new launches mid-event.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # The PTY. `create` is the verb the exec subresource is invoked with (it is a
+  # POST), and it is the backend's FIRST exec grant anywhere in this cluster —
+  # today it holds exactly one binding, ctf-instance-manager, with no exec.
+  # Scoped here it means: arbitrary command execution inside gVisor-contained,
+  # network-less sandbox pods, and nowhere else.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Services kept because the request marked them "likely unused" rather than
+  # unused, and the launcher is shared code from 008/009 that may create one
+  # unconditionally. A missing verb would break lab launches at run time, which
+  # is a worse failure than an unused grant in a namespace with no network.
+  # Trim this once the app side confirms the launcher does not create Services.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # DELIBERATELY ABSENT: networkpolicies. The event owner confirmed the backend
+  # does not need it (2026-10-25). The deny-all in lab/netpol.yaml is
+  # namespace-wide and platform-owned, and withholding `create` here means an
+  # app-side bug cannot add an allow-rule that undoes the containment this
+  # whole design rests on.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ctf-lab-manager
+  namespace: ctf-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ctf-lab-manager
+subjects:
+  - kind: ServiceAccount
+    name: ctf-backend
+    namespace: ctf

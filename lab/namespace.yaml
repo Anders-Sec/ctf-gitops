@@ -1,0 +1,62 @@
+# Namespace for the lab sandbox (app spec 114) — the per-player shell where the
+# player is MEANT to escalate to root. Deliberately separate from
+# ctf-instances so this relaxed profile never loosens policy for the
+# locked-down web-attack containers.
+#
+# Containment here is network-side and runtime-side, not privilege-side:
+# the pod has no network at all (lab/netpol.yaml) and must run under gVisor
+# (lab/gvisor-required.yaml). In-container root is expected.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctf-lab
+---
+# Harden the default SA as in ctf-instances: no auto-mounted token, so a pod
+# that forgets to opt out cannot receive one. This matters more here than
+# anywhere else — the player gets a root shell in this namespace's pods, and a
+# mounted token would hand them an API credential.
+#
+# ghcr-pull is attached so lab pods pull the private image with no per-pod
+# plumbing. NOTE this makes ctf-lab the FOURTH namespace holding ghcr-pull;
+# see the rotation rule in the README runbook.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ctf-lab
+automountServiceAccountToken: false
+imagePullSecrets:
+  - name: ghcr-pull
+---
+# Sized from the request: only players who clear Doom reach this, so a handful
+# concurrent at most, one small pod each. 15 pods x 250m/256Mi requests is
+# 3.75 CPU / 3.75Gi; limits at 15 x 500m/512Mi is 7.5 CPU / 7.5Gi. Headroom is
+# set a little above that so a rolling replacement never wedges on quota — the
+# lesson from bld, where a quota sized to steady state blocked a rollout.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ctf-lab-quota
+  namespace: ctf-lab
+spec:
+  hard:
+    pods: "15"
+    requests.cpu: "5"
+    requests.memory: 5Gi
+    limits.cpu: "10"
+    limits.memory: 10Gi
+---
+# Defaults matching the request's suggested sizing, plus a per-container
+# ceiling so one sandbox cannot crowd the node. max is set to the requested
+# limits rather than below them, so the app's own spec is admitted as written.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ctf-lab-limits
+  namespace: ctf-lab
+spec:
+  limits:
+    - type: Container
+      default: { cpu: 500m, memory: 512Mi }
+      defaultRequest: { cpu: 250m, memory: 256Mi }
+      max: { cpu: "1", memory: 1Gi }

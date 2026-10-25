@@ -1,0 +1,58 @@
+# Makes gVisor an ENFORCED INVARIANT in ctf-lab rather than a convention.
+#
+# Why this exists: nothing on this cluster restricts pod security. There are no
+# pod-security.kubernetes.io labels on any namespace and no admission
+# controllers (no Kyverno, no Gatekeeper, no OPA) — verified 2026-10-25 by
+# creating the lab's exact relaxed profile in a scratch namespace with zero
+# policy, where it was admitted and ran. So the request's "admission policy
+# that admits the lab pod profile" needed no work: the profile was already
+# admissible everywhere.
+#
+# The real risk is the inverse. A pod created in ctf-lab WITHOUT
+# runtimeClassName: gvisor would run that relaxed profile — privilege
+# escalation permitted, setuid retained, writable rootfs — on the DEFAULT
+# runtime, where in-container root is a far shorter distance from the node
+# kernel. And it would fail silently: the pod runs, the shell works, the
+# challenge plays correctly, and the containment boundary is simply absent.
+# This rejects that pod instead.
+#
+# ValidatingAdmissionPolicy is built into Kubernetes (GA since 1.30, and
+# admissionregistration.k8s.io/v1 here), so this adds no components, no
+# webhook, and nothing that can fail closed and take the API server with it.
+#
+# Note what this does NOT enforce: runAsUser / runAsNonRoot. The challenge's
+# escalation path is a root cron whose target the player can rewrite, so the
+# container legitimately needs a root process while the player's exec session
+# starts unprivileged. A policy demanding non-root would break the challenge,
+# so privilege is left to the app's pod spec and only the runtime boundary is
+# enforced here.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: ctf-lab-require-gvisor
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'gvisor'"
+      message: "pods in ctf-lab must set runtimeClassName: gvisor — the relaxed lab profile is only safe inside the gVisor sandbox"
+      reason: Forbidden
+---
+# Scoped to ctf-lab only, by the namespace label Kubernetes sets automatically
+# on every namespace. Nothing outside ctf-lab is affected.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: ctf-lab-require-gvisor
+spec:
+  policyName: ctf-lab-require-gvisor
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ctf-lab
