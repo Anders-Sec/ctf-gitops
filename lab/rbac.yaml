@@ -25,14 +25,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
-  # Services kept because the request marked them "likely unused" rather than
-  # unused, and the launcher is shared code from 008/009 that may create one
-  # unconditionally. A missing verb would break lab launches at run time, which
-  # is a worse failure than an unused grant in a namespace with no network.
-  # Trim this once the app side confirms the launcher does not create Services.
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+  # DELIBERATELY ABSENT: services. The app side confirmed on 2026-10-25 that the
+  # lab is exec-only — no Service, no Ingress, no subdomain — and the launcher
+  # branches to skip them here. Granted briefly while that was only "likely
+  # unused", then trimmed. If a launcher-driven launch ever 403s on services,
+  # this is the line to restore.
+  #
   # DELIBERATELY ABSENT: networkpolicies. The event owner confirmed the backend
   # does not need it (2026-10-25). The deny-all in lab/netpol.yaml is
   # namespace-wide and platform-owned, and withholding `create` here means an
