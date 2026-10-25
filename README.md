@@ -188,9 +188,10 @@ Consequences for routine work:
   effect on a pod roll — which means a mistaken rotation can sit unnoticed until
   the next restart, then break attribution for every sample issued before it.
 
-**Rotating `ghcr-pull`: all THREE namespaces must be updated together** — `ctf`,
-`ctf-bld` and `ctf-instances`. A stale copy in any one of them is invisible while
-the GHCR packages are public, because anonymous pulls succeed and mask it. It only
+**Rotating `ghcr-pull`: all FOUR namespaces must be updated together** — `ctf`,
+`ctf-bld`, `ctf-instances` and `ctf-lab`. A stale copy in any one of them is
+invisible while the GHCR packages are public, because anonymous pulls succeed and
+mask it. It only
 surfaces the moment the packages go private, as:
 
 ```
@@ -206,6 +207,13 @@ real pull in **each** namespace rather than assuming.
 
 Note the challenge images are tagged `sha-<gitsha>`; there is no `v1` tag despite
 what older reply documents in this repo suggest.
+
+Related trap: attaching `imagePullSecrets: [ghcr-pull]` to a namespace's default
+ServiceAccount does **not** create the Secret. `ctf-lab` was created with the
+reference in place and the Secret absent, which would have failed every lab launch
+with `ImagePullBackOff` now that the packages are private. The reference and the
+Secret are two separate things; verify a real pull in the namespace, not just that
+the SA mentions it.
 
 Verified at creation: the `read:packages` token authenticates to GHCR and pulls
 `ctf-backend` and `ctf-frontend` in both `ctf` and `ctf-bld`; the fine-grained
