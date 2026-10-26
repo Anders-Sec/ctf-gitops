@@ -17,14 +17,33 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "create", "delete"]
-  # The PTY. `create` is the verb the exec subresource is invoked with (it is a
-  # POST), and it is the backend's FIRST exec grant anywhere in this cluster —
-  # today it holds exactly one binding, ctf-instance-manager, with no exec.
-  # Scoped here it means: arbitrary command execution inside gVisor-contained,
-  # network-less sandbox pods, and nowhere else.
+  # The PTY. BOTH verbs are required, and which one applies depends on the
+  # transport the client uses:
+  #
+  #   SPDY exec      (what `kubectl exec` does)       POST -> verb `create`
+  #   WebSocket exec (what kubernetes_asyncio does     GET -> verb `get`
+  #                   over aiohttp, a GET + Upgrade)
+  #
+  # The original request asked for `create` only, which is right for SPDY, and
+  # that is what shipped. The backend uses the WebSocket transport, so every lab
+  # shell died on the handshake:
+  #
+  #   aiohttp WSServerHandshakeError: 403 'Invalid response status'
+  #   url='wss://10.43.0.1/api/v1/namespaces/ctf-lab/pods/<name>/exec'
+  #
+  # That was invisible to the obvious check. A SubjectAccessReview for `create`
+  # returns allowed; only one for `get` returns denied. Reviewing the verb in the
+  # Role rather than the verb the client sends confirms what you built instead of
+  # what the code needs.
+  #
+  # `get` is NOT a wider privilege than `create` here: both grant arbitrary
+  # command execution in these pods. Same capability, other transport.
+  #
+  # This remains the backend's only exec grant anywhere in the cluster, and it
+  # reaches only gVisor-contained, network-less sandbox pods in this namespace.
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["get", "create"]
   # DELIBERATELY ABSENT: services. The app side confirmed on 2026-10-25 that the
   # lab is exec-only — no Service, no Ingress, no subdomain — and the launcher
   # branches to skip them here. Granted briefly while that was only "likely
